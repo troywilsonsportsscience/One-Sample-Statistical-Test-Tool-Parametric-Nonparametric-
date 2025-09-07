@@ -1,21 +1,13 @@
-# One-Sample Statistical Testing Tool (R)
-This project provides a reusable R script for conducting **one-sample hypothesis tests** with full automation, assumption checks, visual diagnostics, and APA-style reporting. It is designed for use in **data science, athlete performance analysis, and research applications**.
+# One-Sample Statistical Test Tool (Parametric + Nonparametric)
+- Automated one-sample hypothesis testing for continuous data. The tool:
+- Checks normality (Shapiro–Wilk by default; Anderson–Darling optional).
+- Tries safe transforms (log/sqrt/inv with shifts/epsilons) to rescue normality.
+- Chooses one-sample t-test (raw or transformed) or Wilcoxon signed-rank.
+- Prints APA-style text and a tidy results table.
+- Reports effect sizes: Cohen’s d, Hedges’ g (t path) or r = Z/√n (Wilcoxon).
+- Returns a structured result object (settings, test, effects, tidy table, plots, diagnostics).
 
 ---
-
-## Features
-- **Normality assessment** using the Shapiro–Wilk test with histogram & density overlay  
-- **Optional transformations**: log, square root, inverse  
-- **Automatic best transform selection** (highest Shapiro p-value above α)  
-- **Fallback to Wilcoxon signed-rank test** if normality cannot be achieved or transformations are disabled  
-- **Customizable test direction**: two-sided, greater, or less   
-- **APA-style reporting** with test statistic, p-value, CI, and significance wording  
-- **Effect sizes for t-tests**: Cohen’s *d* and Hedges’ *g* (with qualitative interpretation)  
-- **Faceted ggplot diagnostics** for raw and transformed data  
-- **Automatic package installation and loading**
-
----
-
 ## Setup
 1. Clone the repository:
    ```bash
@@ -26,64 +18,94 @@ This project provides a reusable R script for conducting **one-sample hypothesis
 ---
 
 ## User-Configuration Settings
-- `alpha_level`: significance threshold (default = 0.05)  
-- `tail_type`: `"two.sided"`, `"greater"`, or `"less"`  
-- `metric_label`: friendly name for the variable (used in reporting)
-- `try_transform`: attempt transformations if normality fails (`TRUE`/`FALSE`)(set FALSE directly to Wilcoxon if normality fails)
-- `allowed_transforms`: vector of transforms allowed (`c("log", "sqrt", "inv")`)  
-- `show_intermediate_plots`: show assumption-check plots (`TRUE`/`FALSE`)  
-- `mu_reference`: <- 55 (population/reference value)
+```r
+alpha_level  <- 0.05                 # significance threshold
+tail_type    <- "two.sided"          # "two.sided", "greater", "less"
+metric_label <- "jump height"        # label used in reporting
 
+try_transform      <- TRUE           # attempt transforms if non-normal
+allowed_transforms <- c("log","sqrt","inv")
+method_normality   <- "shapiro"      # "shapiro", "ad", or "none"
+
+show_plots                         <- TRUE
+verbose                            <- TRUE
+report_cis_effect_size             <- FALSE   # CI for g via MBESS if installed
+report_transform_normality_table   <- TRUE    # print p-values for raw + transforms
+show_transform_panel               <- TRUE    # facet histograms for all transforms
+```
 ---
 
 ## Dependencies
-The script handles all required packages automatically:
-- tidyverse (ggplot2, dplyr, tidyr, purrr, stringr)
-- broom
-- car
-- rstatix
-- tibble
-- janitor
+```r
+# The script handles all required packages automatically:
+# Required
+install.packages(c("tidyverse", "broom", "janitor"))
+
+# Optional (enables Anderson–Darling; CI for Hedges' g)
+install.packages(c("nortest", "MBESS"))
+```
 
 ---
+## What it produces
+- Console output (if verbose=TRUE)
+     - Normality p-value and interpretation
+     - If transformed: chosen transform + shift/epsilon used
+     - APA-style report for t or Wilcoxon
+     - Effect sizes
+- Plots (if show_plots=TRUE)
+     - Raw histogram with density/normal overlay (p_hist_raw)
+     - Final-scale histogram (raw or transformed) (p_hist_final)
+     - Raw vs Transformed comparison (only if a transform was used) (p_transform_compare)
+     - Transform audit panel: raw + each allowed transform (optional) (p_transform_panel)
+- Tidy results table (res$tidy)
+     - Method, direction, n, mean/SD (on analyzed scale)
+     - t(df) & CI (t path) or V (Wilcoxon)
+     - Effect sizes (Cohen’s d, Hedges’ g or r)
+     - Transform metadata (name, shift, epsilon)
 
-## WorkFlow
-1. Example test data
-set.seed(123)
-test_data <- tibble::tibble(
-  subject_id = 1:30,
-  test_metric = rnorm(30, mean = 57, sd = 5)
+---
+## Example Data Sets - For learning and Testing
+
+### Noraml
+```r
+set.seed(1)
+test_data <- tibble(
+  subject_id  = 1:40,
+  test_metric = rnorm(40, mean = 56, sd = 4)
 )
-2. Assumption check (Section 2A)  
-   - Histogram with density curve
-   - Shapiro–Wilk test
-3. Transformation (optional) (Section 2B)
-   - Applies allowed transforms (log, sqrt, inv)
-   - Keeps only valid ones for your data
-   - Picks the best transform if it restores normality
-4. Statistical test
-   - One-sample t-test (raw or transformed)
-   - Wilcoxon signed-rank if normality fails
-5. Reporting (Section 4)
-      - APA-style test summary
-      - Tidy results table
-      - Effect sizes (d and g) if parametric
+mu_reference <- 55
+```
 
+### Transform-rescue
+```r
+set.seed(2)
+test_data <- tibble(
+  subject_id  = 1:35,
+  test_metric = rgamma(35, shape = 2, scale = 5)  # skewed
+)
+mu_reference <- 55
+```
+### Heavy outliers - likely nonparametric - Wilcoxon
+```r
+set.seed(3)
+test_data <- tibble(
+  subject_id  = 1:30,
+  test_metric = c(rnorm(25, mean = 55, sd = 4), rep(100, 5))
+)
+mu_reference <- 55
+```
 ---
 
 ## Output Example
-### Parametric
-A one-sample t-test was conducted to compare jump height to the reference value of 55 (α = 0.05).
-The data were log-transformed to meet normality assumptions before analysis.
-The mean jump height (M = 4.01, SD = 0.10) was significantly different from 55,
-t(29) = 2.52, p = 0.018, 95% CI [3.97, 4.06].
-Effect size (on log-transformed scale): Cohen's d = 0.46 (Hedges' g = 0.45), small.
+### Parametric (Classic, transformed):
+A one-sample t-test compared jump height to μ = 55 (α = 0.05).
+Data were log-transformed to meet normality.
+M = 4.01, SD = 0.10; t(29) = 2.52, p = .018, 95% CI [3.97, 4.06].
+Effect size: Cohen’s d = 0.46; Hedges’ g = 0.45.
 
-### Nonparametric - Wilcoxon signed-rank test
-A Wilcoxon signed-rank test was conducted to assess whether jump height was different from 55 (α = 0.05).
-This nonparametric test was used because the normality assumption could not be satisfied.
-The result showed that the median jump height was not significantly different from 55,
-V = 229, p = 0.952.
+### Nonparametric (Wilcoxon):
+Wilcoxon signed-rank vs μ = 55 (α = 0.05): V = 229, p = .952.
+Effect size: r = Z/√n.
 
 ---
 
@@ -110,5 +132,4 @@ Contributions welcome! If you'd like to suggest improvements, fix bugs, feel fre
 
 ## Contact
 
-Created and maintained by **Troy Wilson**. For issues or feature requests, please use the GitHub Issues tab.
-This project was developed with the assistance of OpenAI's ChatGPT to help structure code, explain statistical logic, and improve documentation clarity.
+Created and maintained by **Troy Wilson** with the assistance of OpenAI's ChatGPT to help structure code, explain statistical logic, and improve documentation clarity. For issues or feature requests, please use the GitHub Issues tab.
