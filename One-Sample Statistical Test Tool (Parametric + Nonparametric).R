@@ -1,65 +1,25 @@
 # ===============================================================
 # One-Sample Statistical Test Tool (Parametric + Nonparametric)
 # ===============================================================
-# 
-# This R script performs a fully automated one-sample hypothesis test
-# for continuous numeric data. It is designed for flexible reuse across
-# datasets and projects in data science, human performance, and research.
+# Author: Troy Wilson
 #
-# --------------------------
-# What the Script Does:
-# --------------------------
-# 1. Loads or simulates data with a numeric test metric.
-# 2. Checks for normality using the Shapiro-Wilk test and visual inspection.
-# 3. If data are non-normal:
-#    - Applies three transformations: log, square root, and inverse.
-#    - Selects the transformation that most improves normality (highest p-value).
-#    - If none succeed, defaults to a Wilcoxon signed-rank test.
-# 4. Executes the appropriate one-sample test:
-#    - t-test (raw or transformed data)
-#    - Wilcoxon signed-rank test (nonparametric)
-# 5. Reports results in APA-style, including test direction and significance.
+# Purpose:
+#   Automated one-sample hypothesis testing for continuous data.
+#   Performs assumption checks (Shapiro-Wilk), optional transforms,
+#   and runs either a t-test or Wilcoxon signed-rank test.
+#   Outputs APA-style results with effect sizes (Cohen's d, Hedges' g).
 #
-# -------------------------------
-# Key Parameters (User-Editable):
-# -------------------------------
-# - `mu_reference`: the population value to compare against.
-#     → If not set manually, the script will auto-calculate it as the sample mean.
-# - `tail_type`: "two.sided", "greater", or "less" to specify the hypothesis direction.
-# - `alpha_level`: significance threshold (default is 0.05).
-# - `metric_label`: a friendly name for the test variable used in reporting.
-#
-# ---------------------------
-# Transformations Included:
-# ---------------------------
-# - Log transformation: log(x)
-# - Square root: sqrt(x)
-# - Inverse: 1 / x
-#
-# -------------------------
-# Visualization Features:
-# -------------------------
-# - Histograms with overlaid density curves for raw and transformed data
-# - Faceted plots for comparison of transformation effects
-#
-# --------------------------
-# Output Includes:
-# --------------------------
-# - Console-based APA-style test summary
-# - Tidy result tables for parametric and nonparametric results
-# - Optional back-transformed summary for transformed tests
-#
-# --------------------------
-# Dependencies:
-# --------------------------
-# - tidyverse, car, broom, rstatix, BSDA, ggplot2, tibble, dplyr, janitor
+# Documentation:
+#   Full usage instructions, examples, and notes are in the README.md
+#   file included in this repository.
+# ===============================================================
 
 # -------------------------------
 # Helper: Install and Load Packages
 # -------------------------------
 # These packages are required for data manipulation, visualization, assumption checks, and APA-style reporting.
 
-required_packages <- c("tidyverse", "car", "broom", "rstatix", "janitor")
+required_packages <- c("tidyverse", "car", "broom", "rstatix", "janitor", "tibble", "ggplot2", "dplyr", "stringr")
 
 install_if_missing <- function(pkg) {
   if (!requireNamespace(pkg, quietly = TRUE)) {
@@ -83,6 +43,11 @@ tail_type <- "two.sided"  # change to "greater" or "less" if testing a direction
 # Define metric you will be using so you can easily update reporting later.
 metric_label <- "jump height"  # or "vertical displacement", "sprint time", etc.
 
+# ---- Transform Settings (user-configurable) ----
+try_transform         <- TRUE                 # attempt transforms for normality, FALSE default to Wilcoxon signed-rank test if normailty fails
+allowed_transforms    <- c("log", "sqrt", "inv")  # any subset of: "log", "sqrt", "inv"
+show_transform_plot   <- TRUE                 # show the 4-panel plot (raw + transforms)
+
 # ----# 1. Real Data Input----
 # Load or assign your real dataset here
 # Example structure: your_data <- read_csv("your_file.csv") OR assign directly
@@ -96,13 +61,6 @@ metric_label <- "jump height"  # or "vertical displacement", "sprint time", etc.
 
 # Define population/reference value (mu) to compare against
 mu_reference <- 55  # Edit this value as needed for your analysis
-
-# If mu_reference is not predefined, calculate it from the data
-# Defaulting to the mean of test_metric
-if (!exists("mu_reference")) {
-  mu_reference <- mean(test_data$test_metric, na.rm = TRUE)
-  cat(sprintf("ℹ️  Auto-calculated mu_reference from data: %.2f\n", mu_reference))
-}
 
 # If you paste in a data frame, make sure it looks something like:
 # test_data <- tibble(
@@ -120,142 +78,162 @@ if (!exists("mu_reference")) {
 # )
 
 # # Simulated Non-Normal example: positively skewed or with outliers
-# set.seed(202)
-# test_data <- tibble(
-#   subject_id = 1:30,
-#   test_metric = rexp(30, rate = 1/55)  # Exponential distribution (positively skewed)
-# )
-
-# Simulated Non-Normal example: heavy right-tail outliers
-set.seed(404)
+set.seed(202)
 test_data <- tibble(
   subject_id = 1:30,
-  test_metric = c(rnorm(25, mean = 55, sd = 4), rep(100, 5))  # heavy right-tail outliers
+  test_metric = rexp(30, rate = 1/55)  # Exponential distribution (positively skewed)
 )
 
+# Simulated Non-Normal example: heavy right-tail outliers
+# set.seed(404)
+# test_data <- tibble(
+#   subject_id = 1:30,
+#   test_metric = c(rnorm(25, mean = 55, sd = 4), rep(100, 5))  # heavy right-tail outliers
+# )
 
-# ----2A. Check Normality of the Sample----
 
-# Visual check: Histogram with normal curve
+# ---- 2A. Normality check ----
+analysis_method <- NA_character_  # "t_standard", "t_transformed", "nonparametric"
+
+# Visual check
 ggplot(test_data, aes(x = test_metric)) +
   geom_histogram(aes(y = ..density..), bins = 10, fill = "skyblue", color = "black") +
-  stat_function(fun = dnorm, args = list(mean = mean(test_data$test_metric), 
-                                         sd = sd(test_data$test_metric)), 
+  stat_function(fun = dnorm,
+                args = list(mean = mean(test_data$test_metric),
+                            sd   = sd(test_data$test_metric)),
                 col = "red", linetype = "dashed") +
   labs(title = "Histogram of Test Metric", x = "Test Metric", y = "Density")
 
-# Shapiro-Wilk test for normality (recommended when n < 50)
+# Shapiro-Wilk
 shapiro_test <- shapiro.test(test_data$test_metric)
 print(shapiro_test)
 
-# Branch based on normality result
-if (shapiro_test$p.value < 0.05) {
-  cat("❗ Normality violated (Shapiro-Wilk p < 0.05). Trying transformations in Section 2B...\n\n")
-  
-  # Flow continues in Section 2B
-  
-} else {
-  cat("✅ Normality confirmed (Shapiro-Wilk p ≥ 0.05). Proceeding with raw data.\n")
-  cat("➡️ Move to Section 3 for results reporting. Sections 2B (transformations) and 2C (nonparametric) will be skipped.\n\n")
-  
-  # Prep for analysis
+normality_failed <- (shapiro_test$p.value < alpha_level)
+
+if (!normality_failed) {
+  cat("Normality confirmed (Shapiro-Wilk p ≥ alpha). Using raw data.\n\n")
   analysis_var <- test_data$test_metric
   mu_test <- mu_reference
   label <- "raw"
   t_result <- t.test(analysis_var, mu = mu_test, alternative = tail_type)
-  mean_val <- mean(analysis_var)
-  sd_val   <- sd(analysis_var)
+  mean_val <- mean(analysis_var); sd_val <- sd(analysis_var)
   test_label <- "One-sample t-test on raw data"
   analysis_method <- "t_standard"
-}
-# -----2B. If normality violated try transformations for parametric testing. Otherwise move to Wilcoxon Signed-Rank Test (Nonparametric)-----------
-
-# Apply three transformations
-test_data <- test_data %>%
-  mutate(
-    log_metric  = log(test_metric),
-    sqrt_metric = sqrt(test_metric),
-    inv_metric  = 1 / test_metric
-  )
-
-# Check normality of each
-log_p  <- shapiro.test(test_data$log_metric)$p.value
-sqrt_p <- shapiro.test(test_data$sqrt_metric)$p.value
-inv_p  <- shapiro.test(test_data$inv_metric)$p.value
-
-cat("🔎 Shapiro-Wilk p-values for transformations:\n",
-    sprintf("- Log: %.4f\n- Sqrt: %.4f\n- Inverse: %.4f\n", log_p, sqrt_p, inv_p))
-
-# --- Visualization of Original vs Transformed Distributions ---
-plot_data <- test_data %>%
-  select(test_metric, log_metric, sqrt_metric, inv_metric) %>%
-  pivot_longer(cols = everything(), names_to = "transform_type", values_to = "value") %>%
-  mutate(
-    transform_type = dplyr::recode(transform_type,
-                                   "test_metric" = "Raw",
-                                   "log_metric" = "Log",
-                                   "sqrt_metric" = "Square Root",
-                                   "inv_metric" = "Inverse"
-    )
-  )
-
-ggplot(plot_data, aes(x = value)) +
-  geom_histogram(aes(y = ..density..), bins = 10, fill = "skyblue", color = "black") +
-  geom_density(col = "red", linetype = "dashed", size = 1) +
-  facet_wrap(~transform_type, scales = "free", ncol = 2) +
-  labs(title = "Histogram of Raw and Transformed Metrics",
-       x = "Value",
-       y = "Density") +
-  theme_minimal()
-
-# ---- Transformation Selection ----
-
-# Create named list of p-values
-transform_results <- list(
-  log = list(p = log_p, var = test_data$log_metric, mu = log(mu_reference), label = "log-transformed"),
-  sqrt = list(p = sqrt_p, var = test_data$sqrt_metric, mu = sqrt(mu_reference), label = "square root-transformed"),
-  inv = list(p = inv_p, var = test_data$inv_metric, mu = 1 / mu_reference, label = "inverse-transformed")
-)
-
-# Filter for transformations that pass normality, then pick the best (highest p-value)
-valid_transforms <- Filter(function(x) x$p > alpha_level, transform_results)
-
-if (length(valid_transforms) > 0) {
-  # Select the transformation with the highest p-value
-  best_transform <- valid_transforms[[which.max(sapply(valid_transforms, function(x) x$p))]]
-  
-  analysis_var <- best_transform$var
-  mu_test <- best_transform$mu
-  label <- best_transform$label
-  
-  cat(sprintf("✔️ Normality restored using %s data. Proceeding with one-sample t-test.\n", label))
-  
-  t_result <- t.test(analysis_var, mu = mu_test, alternative = tail_type)
-  mean_val <- mean(analysis_var)
-  sd_val   <- sd(analysis_var)
-  test_label <- paste("One-sample t-test on", label, "data")
-  analysis_method <- "t_transformed"
-  
 } else {
-  cat("❌ No transformation restored normality. Will use Wilcoxon test in Section 2C.\n")
-  analysis_method <- "nonparametric"
+  cat("Normality violated (Shapiro-Wilk p < alpha). Assessing next steps...\n\n")
+  if (!isTRUE(try_transform)) {
+    cat("ℹ️ Transformations disabled (try_transform = FALSE). Proceeding directly to Wilcoxon.\n\n")
+    analysis_method <- "nonparametric"
+  }
 }
 
+# ---- 2B. Transformations (only if normality failed AND toggled on) ----
+if (normality_failed && isTRUE(try_transform)) {
+  cat("↪ Attempting transformations...\n")
+  
+  available_transforms <- list(
+    log  = function(x) log(x),
+    sqrt = function(x) sqrt(x),
+    inv  = function(x) 1 / x
+  )
+  selected_transforms <- available_transforms[names(available_transforms) %in% allowed_transforms]
+  
+  # Filter invalid transforms
+  is_valid <- function(name, x, mu) {
+    if (name == "log")  return(all(x > 0,  na.rm = TRUE) && is.finite(log(mu)))
+    if (name == "sqrt") return(all(x >= 0, na.rm = TRUE) && is.finite(sqrt(mu)))
+    if (name == "inv")  return(!any(abs(x) < 1e-12, na.rm = TRUE) && is.finite(1/mu))
+    TRUE
+  }
+  valid_names <- names(selected_transforms)[purrr::map_lgl(names(selected_transforms),
+                                                           ~ is_valid(.x, test_data$test_metric, mu_reference))]
+  selected_transforms <- selected_transforms[valid_names]
+  
+  if (length(selected_transforms) == 0) {
+    cat("⚠️ No valid transformations available. Using Wilcoxon.\n\n")
+    analysis_method <- "nonparametric"
+  } else {
+    transformed_cols <- purrr::map_dfc(selected_transforms, ~ .x(test_data$test_metric))
+    transformed_cols <- setNames(transformed_cols, paste0(names(selected_transforms), "_metric"))
+    
+    transformed <- bind_cols(test_data, transformed_cols) |>
+      pivot_longer(
+        cols = ends_with("_metric"),
+        names_to = "transform_type",
+        values_to = "transformed_value"
+      ) |>
+      mutate(transform_type = str_remove(transform_type, "_metric"))
+    
+    # Shapiro on each transformed series
+    transform_results <- transformed |>
+      group_by(transform_type) |>
+      summarise(p_value = shapiro.test(transformed_value)$p.value, .groups = "drop")
+    print(transform_results)
+    
+    if (isTRUE(show_transform_plot)) {
+      cat("↪ Showing histograms for transformed values...\n")
+      facet_data <- transformed |>
+        left_join(transform_results, by = "transform_type") |>
+        mutate(facet_label = paste0(transform_type, " (SW p = ", sprintf("%.3f", p_value), ")"))
+      ggplot(facet_data, aes(x = transformed_value)) +
+        geom_histogram(aes(y = ..density..), bins = 12, fill = "skyblue", color = "black") +
+        geom_density(col = "red", linetype = "dashed", size = 1) +
+        facet_wrap(~facet_label, scales = "free", ncol = 2) +
+        labs(title = "Distribution of Transformed Metric", x = metric_label, y = "Density") +
+        theme_minimal() |>
+        print()
+    }
+    
+    viable <- transform_results |>
+      filter(p_value > alpha_level) |>
+      arrange(desc(p_value))
+    
+    if (nrow(viable) > 0) {
+      best_transform <- viable$transform_type[1]
+      
+      analysis_var <- transformed |>
+        filter(transform_type == best_transform) |>
+        pull(transformed_value)
+      
+      mu_test <- switch(best_transform,
+                        log  = log(mu_reference),
+                        sqrt = sqrt(mu_reference),
+                        inv  = 1 / mu_reference)
+      
+      label <- case_when(
+        best_transform == "log"  ~ "log-transformed",
+        best_transform == "sqrt" ~ "square root-transformed",
+        best_transform == "inv"  ~ "inverse-transformed",
+        TRUE ~ best_transform
+      )
+      
+      cat("✔️ Transformation successful using:", best_transform, "→ t-test on transformed data.\n\n")
+      t_result <- t.test(analysis_var, mu = mu_test, alternative = tail_type)
+      mean_val <- mean(analysis_var); sd_val <- sd(analysis_var)
+      test_label <- paste("One-sample t-test on", label, "data")
+      analysis_method <- "t_transformed"
+    } else {
+      cat("❌ No transformation restored normality. Using Wilcoxon.\n\n")
+      analysis_method <- "nonparametric"
+    }
+  }
+}
 
-# -----2C. If Normality Assumption is Violated Use Wilcoxon Signed-Rank Test (Nonparametric)--------
-
+# ---- 2C. Wilcoxon (nonparametric) if selected path ----
 if (analysis_method == "nonparametric") {
   wilcox_result <- wilcox.test(test_data$test_metric, mu = mu_reference, alternative = tail_type)
   print(wilcox_result)
+}
+
   
   # Reporting Guidance:
   # "A Wilcoxon signed-rank test indicated that the median test metric was [significantly/not significantly] 
   # different from mu_reference, V = XX, p = XX."
-}
+
 # If Warning - Warning message: In wilcox.test.default(test_data$test_metric, mu = mu_reference: cannot compute exact p-value with ties
 # Indicates that there are tied ranks in the data, so the model swaps to another method of p-value calculation.
 
-# -----# 3. Run One-Sample t-Test--------
+# -----# 3A. Run One-Sample t-Test--------
 
 # Only runs if parametric method was selected (normal or transformed)
 if (analysis_method %in% c("t_standard", "t_transformed")) {
@@ -291,18 +269,26 @@ if (analysis_method %in% c("t_standard", "t_transformed")) {
   
 }
 
-# -----4A. APA-style Reporting (Parametric Results)-------------
+# ---3B. Effect size for one-sample t (parametric)---
+n <- length(analysis_var)
+cohen_d <- (mean_val - mean(mu_test)) / sd_val                 # one-sample d = (M - mu) / SD
+J <- 1 - (3 / (4*n - 1))                                       # small-sample correction
+hedges_g <- J * cohen_d
 
+# (Optional) quick descriptor
+interpret_d <- function(d) {
+  d_abs <- abs(d)
+  if (d_abs < 0.20) "trivial"
+  else if (d_abs < 0.50) "small"
+  else if (d_abs < 0.80) "medium"
+  else "large"
+}
+d_label <- interpret_d(cohen_d)
+
+# -----4A. APA-style Reporting (Parametric Results)-------------
 if (analysis_method %in% c("t_standard", "t_transformed")) {
   
-  # Optional: define a readable name for the tested metric
-  # If not already defined in Section 1:
-  # metric_label <- "jump height"
-  
-  # Determine significance wording
-  sig_label <- ifelse(t_result$p.value < alpha_level, "significantly", "not significantly")
-  
-  # Directional comparison label
+  sig_label <- ifelse(t_result$p.value < alpha_level, "significantly different", "not significantly different")
   direction_label <- switch(
     tail_type,
     "two.sided" = "different from",
@@ -310,42 +296,41 @@ if (analysis_method %in% c("t_standard", "t_transformed")) {
     "less"      = "less than"
   )
   
-  # APA-style output
   cat(sprintf(
     "A one-sample t-test was conducted to compare %s to the reference value of %.2f (α = %.2f).\n",
     metric_label, mu_reference, alpha_level
   ))
   
   if (analysis_method == "t_transformed") {
-    cat(sprintf(
-      "The data were %s to meet normality assumptions prior to analysis.\n",
-      label
-    ))
+    cat(sprintf("The data were %s to meet normality assumptions prior to analysis.\n", label))
   }
   
   cat(sprintf(
     "The mean %s (M = %.2f, SD = %.2f) was %s %.2f, t(%d) = %.2f, p = %.3f, 95%% CI [%.2f, %.2f].\n",
     metric_label,
-    mean_val,
-    sd_val,
-    sig_label,
-    mu_reference,
+    mean_val, sd_val,
+    sig_label, mu_reference,
     round(t_result$parameter, 0),
     round(t_result$statistic, 2),
     round(t_result$p.value, 3),
-    round(t_result$conf.int[1], 2),
-    round(t_result$conf.int[2], 2)
+    round(t_result$conf.int[1], 2), round(t_result$conf.int[2], 2)
   ))
+  
+  # Effect size line
+  if (analysis_method == "t_transformed") {
+    cat(sprintf("Effect size (on %s scale): Cohen's d = %.2f (Hedges' g = %.2f), %s.\n",
+                label, cohen_d, hedges_g, d_label))
+  } else {
+    cat(sprintf("Effect size: Cohen's d = %.2f (Hedges' g = %.2f), %s.\n",
+                cohen_d, hedges_g, d_label))
+  }
 }
 
-# -----4B. APA-style Reporting (Wilcoxon Nonparametric Results)-------------
 
+# -----4B. APA-style Reporting (Wilcoxon Nonparametric Results)-------------
 if (analysis_method == "nonparametric") {
   
-  # Determine significance wording
   sig_label <- ifelse(wilcox_result$p.value < alpha_level, "significantly", "not significantly")
-  
-  # Directional label for APA-style language
   direction_label <- switch(
     tail_type,
     "two.sided" = "different from",
@@ -353,7 +338,6 @@ if (analysis_method == "nonparametric") {
     "less"      = "less than"
   )
   
-  # Manually create tidy-style summary
   wilcox_summary <- tibble::tibble(
     Method = "Wilcoxon Signed-Rank Test",
     `Test Direction` = tail_type,
@@ -363,27 +347,16 @@ if (analysis_method == "nonparametric") {
     `Alpha Level` = alpha_level,
     `Significant?` = ifelse(wilcox_result$p.value < alpha_level, "Yes", "No")
   )
-  
   print(wilcox_summary)
   
-  # APA-style reporting
   cat(sprintf(
     "A Wilcoxon signed-rank test was conducted to assess whether %s was %s the reference value of %.2f (α = %.2f).\n",
-    metric_label,
-    direction_label,
-    mu_reference,
-    alpha_level
+    metric_label, direction_label, mu_reference, alpha_level
   ))
-  
-  cat("This nonparametric test was used because the normality assumption could not be satisfied, even after transformation.\n")
-  
+  cat("This nonparametric test was used because the normality assumption could not be satisfied.\n")
   cat(sprintf(
     "The result showed that the median %s was %s %.2f, V = %.2f, p = %.3f.\n",
-    metric_label,
-    sig_label,
-    mu_reference,
-    wilcox_result$statistic,
-    wilcox_result$p.value
+    metric_label, sig_label, mu_reference, wilcox_result$statistic, wilcox_result$p.value
   ))
 }
 # End of Script
