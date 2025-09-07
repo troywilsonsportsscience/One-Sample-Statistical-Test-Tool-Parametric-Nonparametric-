@@ -4,15 +4,15 @@ This project provides a reusable R script for conducting **one-sample hypothesis
 ---
 
 ## Features
-- **Normality assessment** using the Shapiro-Wilk test and histogram
-- **Automatic data transformation** (log, square root, inverse)
-- **Best-fit transformation selection** based on Shapiro-Wilk p-values
-- **Fallback to Wilcoxon signed-rank test** if transformations fail
-- **Customizable test direction**: two-sided, greater, or less
-- **Auto-calculation of mu_reference** (or user-defined)
-- **APA-style reporting** (including tail direction and alpha level)
-- **Faceted ggplot diagnostics** for all transformed variants
-- **Auto-installs required packages**
+- **Normality assessment** using the Shapiro–Wilk test with histogram & density overlay  
+- **Optional transformations**: log, square root, inverse  
+- **Automatic best transform selection** (highest Shapiro p-value above α)  
+- **Fallback to Wilcoxon signed-rank test** if normality cannot be achieved or transformations are disabled  
+- **Customizable test direction**: two-sided, greater, or less   
+- **APA-style reporting** with test statistic, p-value, CI, and significance wording  
+- **Effect sizes for t-tests**: Cohen’s *d* and Hedges’ *g* (with qualitative interpretation)  
+- **Faceted ggplot diagnostics** for raw and transformed data  
+- **Automatic package installation and loading**
 
 ---
 
@@ -25,47 +25,76 @@ This project provides a reusable R script for conducting **one-sample hypothesis
 
 ---
 
+## User-Configuration Settings
+- alpha_level      <- 0.05 (significance threshold)
+- tail_type        <- "two.sided" (options: "two.sided", "greater", "less")
+- metric_label     <- "jump height" (friendly name for reporting)
+- try_transform      <- TRUE (set FALSE to skip transformations and forces the script to skip transformations and go directly to Wilcoxon if normality fails)
+- allowed_transforms <- c("log", "sqrt", "inv") (choose which transforms to allow)
+- show_transform_plot <- TRUE (show diagnostic histograms/densities)
+- mu_reference <- 55 (population/reference value)
+
+---
+
 ## Dependencies
 The script handles all required packages automatically:
-- tidyverse
+- tidyverse (ggplot2, dplyr, tidyr, purrr, stringr)
 - broom
 - car
 - rstatix
+- tibble
 - janitor
 
 ---
 
-## Example Use Case
-#Example test data
+## WorkFlow
+1. Example test data
 set.seed(123)
 test_data <- tibble::tibble(
   subject_id = 1:30,
   test_metric = rnorm(30, mean = 57, sd = 5)
 )
+2. Assumption check (Section 2A)  
+   - Histogram with density curve
+   - Shapiro–Wilk test
+3. Transformation (optional) (Section 2B)
+   - Applies allowed transforms (log, sqrt, inv)
+   - Keeps only valid ones for your data
+   - Picks the best transform if it restores normality
+4. Statistical test
+   - One-sample t-test (raw or transformed)
+   - Wilcoxon signed-rank if normality fails
+5. Reporting (Section 4)
+      - APA-style test summary
+      - Tidy results table
+      - Effect sizes (d and g) if parametric
 
-### The script will:
-- Check for normality (Section 2A)
-- Apply and evaluate transformations if needed (Section 2B)
-- Run a one-sample t-test or Wilcoxon signed-rank test (Section 3)
-- Report APA-style results (Section 4)
-- Display diagnostic plots
-  
 ---
 
 ## Output Example
+### Parametric
 A one-sample t-test was conducted to compare jump height to the reference value of 55 (α = 0.05).
-The log-transformed mean jump height (M = 4.01, SD = 0.10) was significantly greater than 55,
+The data were log-transformed to meet normality assumptions before analysis.
+The mean jump height (M = 4.01, SD = 0.10) was significantly different from 55,
 t(29) = 2.52, p = 0.018, 95% CI [3.97, 4.06].
+Effect size (on log-transformed scale): Cohen's d = 0.46 (Hedges' g = 0.45), small.
+
+### Nonparametric - Wilcoxon signed-rank test
+A Wilcoxon signed-rank test was conducted to assess whether jump height was different from 55 (α = 0.05).
+This nonparametric test was used because the normality assumption could not be satisfied.
+The result showed that the median jump height was not significantly different from 55,
+V = 229, p = 0.952.
 
 ---
 
-## Customization
-- You can edit these user-configurable parameters in Section 1 of the script:
-- mu_reference: Population value to test against (optional; auto-calculated if omitted)
-- tail_type: Direction of test ("two.sided", "greater", "less")
-- alpha_level: Significance threshold (default = 0.05)
-- metric_label: Friendly variable name used in output
-You may also replace the simulated data section (1B) with your real dataset via CSV or direct assignment.
+## Effect Sizes
+- Cohen’s d: mean difference in standard deviation units.
+- Hedges’ g: small-sample corrected d.
+- Both are reported for parametric tests; interpret as:
+   - < 0.20 = trivial
+   - 0.20–0.49 = small
+   - 0.50–0.79 = medium
+   - ≥ 0.80 = large
 
 ---
 
@@ -75,7 +104,7 @@ MIT License. Free to use, modify, and share.
 ---
 
 ## Contributing
-Contributions welcome! If you'd like to suggest improvements, fix bugs, or add support for other test types (e.g., two-sample or paired tests), feel free to open a pull request or start a discussion.
+Contributions welcome! If you'd like to suggest improvements, fix bugs, feel free to open a pull request or start a discussion.
 
 ---
 
