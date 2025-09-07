@@ -26,13 +26,13 @@ This project provides a reusable R script for conducting **one-sample hypothesis
 ---
 
 ## User-Configuration Settings
-- alpha_level      <- 0.05 (significance threshold)
-- tail_type        <- "two.sided" (options: "two.sided", "greater", "less")
-- metric_label     <- "jump height" (friendly name for reporting)
-- try_transform      <- TRUE (set FALSE to skip transformations and forces the script to skip transformations and go directly to Wilcoxon if normality fails)
-- allowed_transforms <- c("log", "sqrt", "inv") (choose which transforms to allow)
-- show_transform_plot <- TRUE (show diagnostic histograms/densities)
-- mu_reference <- 55 (population/reference value)
+- `alpha_level`: significance threshold (default = 0.05)  
+- `tail_type`: `"two.sided"`, `"greater"`, or `"less"`  
+- `metric_label`: friendly name for the variable (used in reporting)
+- `try_transform`: attempt transformations if normality fails (`TRUE`/`FALSE`)(set FALSE directly to Wilcoxon if normality fails)
+- `allowed_transforms`: vector of transforms allowed (`c("log", "sqrt", "inv")`)  
+- `show_intermediate_plots`: show assumption-check plots (`TRUE`/`FALSE`)  
+- `mu_reference`: <- 55 (population/reference value)
 
 ---
 
