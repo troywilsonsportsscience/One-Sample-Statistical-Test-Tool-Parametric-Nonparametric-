@@ -1,14 +1,60 @@
 # One-Sample Statistical Test Tool (Parametric + Nonparametric)
-- Automated one-sample hypothesis testing for continuous data. The tool:
-- Checks normality (Shapiro–Wilk by default; Anderson–Darling optional).
-- Tries safe transforms (log/sqrt/inv with shifts/epsilons) to rescue normality.
-- Chooses one-sample t-test (raw or transformed) or Wilcoxon signed-rank.
-- Prints APA-style text and a tidy results table.
-- Reports effect sizes: Cohen’s d, Hedges’ g (t path) or r = Z/√n (Wilcoxon).
-- Returns a structured result object (settings, test, effects, tidy table, plots, diagnostics).
+An all-in-one R script for automated one-sample hypothesis testing with assumption checks, optional safe transforms, effect sizes, and APA-style reporting.
 
 ---
-## Setup
+## 1) Features
+- Assumption checks
+   - Normality of (x − μ) using Shapiro–Wilk (default) or Anderson–Darling.
+- Automatic decision logic
+   - One-sample t (raw or transformed scale) if assumptions satisfied.
+   - Wilcoxon signed-rank if normality fails and cannot be rescued.
+- Safe transformations
+   - Log, square root, inverse, Yeo–Johnson (via bestNormalize).
+   - Applied with safe shifts/epsilons to avoid invalid values.
+   - Transform chosen if it restores normality (p ≥ α).
+- Effect sizes
+   - Parametric: Cohen’s d (mean difference ÷ SD), Hedges’ g (bias-corrected d), optional 95% CI for g (via MBESS).
+   - Nonparametric: r = Z/√n from Wilcoxon statistic.
+- Outputs
+   - APA-style text (with assumptions + interpretation).
+   - Group descriptives (M, SD, Median, n).
+   - Tidy tibble with test results & effect sizes.
+- Visualization
+   - Histograms with normal overlays.
+   - Q–Q plots.
+   - Transform audit panels (raw vs transforms).
+
+---
+## 2) Installation
+```r
+# R >= 4.1 recommended
+required_packages <- c("tidyverse", "broom", "janitor", "ggplot2")
+install.packages(setdiff(required_packages, rownames(installed.packages())))
+
+# Optional (extra functionality)
+install.packages(c("nortest", "MBESS", "bestNormalize"))
+```
+The script includes an install_if_missing() helper to load/install automatically.
+
+---
+## 3) Settings (Section 0)
+
+```r
+alpha_level   <- 0.05                  # significance threshold
+tail_type     <- "two.sided"           # "two.sided", "greater", "less"
+metric_label  <- "jump height"         # label for reporting
+mu_reference  <- 55                    # reference value (μ)
+
+try_transform <- TRUE                  # attempt transforms if non-normal
+allowed_transforms <- c("log","sqrt","inv","yeojohnson")
+method_normality   <- "shapiro"        # "shapiro", "ad", or "none"
+
+show_plots             <- TRUE
+show_transform_panel   <- TRUE
+verbose                <- TRUE
+report_cis_effect_size <- FALSE        # 95% CI for g via MBESS
+report_transform_normality_table <- TRUE
+```
 1. Clone the repository:
    ```bash
    git clone https://github.com/your-username/one-sample-test-tool.git
